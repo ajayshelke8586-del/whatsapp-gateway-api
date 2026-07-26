@@ -1,19 +1,21 @@
 {
   "name": "whatsapp-gateway-api",
   "version": "1.0.0",
-  "description": "Self-Hosted Custom Whapi/Green-API HTTP REST Gateway for WhatsApp",
+  "description": "WhatsApp Baileys WebSockets Gateway REST API",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.5.0",
-    "axios": "^1.7.2",
+    "axios": "^1.6.8",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "pino": "^9.0.0",
     "qrcode": "^1.5.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

@@ -117,9 +117,9 @@ app.post('/api/messages/send', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================================`);
   console.log(`  Custom WhatsApp Gateway API running on port ${PORT}`);
-  console.log(`  Health Check: http://localhost:${PORT}/health`);
+  console.log(`  Health Check: http://0.0.0.0:${PORT}/health`);
   console.log(`====================================================`);
 });
