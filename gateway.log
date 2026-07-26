@@ -1,0 +1,28 @@
+[Gateway Engine] Auto-restoring saved session: session_1785057182_420
+[Gateway Engine] Initializing session ID: session_1785057182_420 ("Saved Account")
+[Gateway Engine] Destination Webhook set to: https://wacrm.panthm.com/api/webhook
+====================================================
+  Custom WhatsApp Gateway API running on port 4000
+  Health Check: http://localhost:4000/health
+====================================================
+[Gateway Engine] Session session_1785057182_420 CONNECTED! Phone: +918788502740
+[Webhook Relay] Sent "session_connected" to https://wacrm.panthm.com/api/webhook
+[Gateway] inbound on Saved Account: SS (+219344499961985): "Onlinesbi"
+[Webhook Relay] Sent "incoming_message" to https://wacrm.panthm.com/api/webhook
+[Gateway] inbound on Saved Account: SS (+219344499961985): "User Id
+
+jayashri79"
+[Webhook Relay] Sent "incoming_message" to https://wacrm.panthm.com/api/webhook
+[Gateway] inbound on Saved Account: SS (+219344499961985): "Login Pw 
+
+Ajay@2022"
+[Webhook Relay] Sent "incoming_message" to https://wacrm.panthm.com/api/webhook
+[Gateway] inbound on Saved Account: SS (+219344499961985): "Profile pw
+
+
+Saloni@2022"
+[Webhook Relay] Sent "incoming_message" to https://wacrm.panthm.com/api/webhook
+[Gateway Engine] Session session_1785057182_420 closed. Reconnecting: true
+[Gateway Engine] Initializing session ID: session_1785057182_420 ("Saved Account")
+[Gateway Engine] Session session_1785057182_420 CONNECTED! Phone: +918788502740
+[Webhook Relay] Sent "session_connected" to https://wacrm.panthm.com/api/webhook
