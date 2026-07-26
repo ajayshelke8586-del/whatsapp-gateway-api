@@ -1,0 +1,13 @@
+/**
+ * Render Blueprint (render.yaml) for 100% Free WhatsApp Gateway API
+ */
+services:
+  - type: web
+    name: whatsapp-gateway-api
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: WEBHOOK_URL
+        value: https://wacrm.panthm.com/api/webhook
