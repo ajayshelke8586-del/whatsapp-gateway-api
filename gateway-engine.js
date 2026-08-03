@@ -159,15 +159,15 @@ async function initSession(sessionId, sessionName = 'Primary WebJS Line') {
     });
 
     client.initialize().catch((err) => {
-      console.error(`[Pure WebJS Init Error ${sessionId}]: ${err.message}`);
+      console.error(`[Pure WebJS Init Error ${sessionId}]:`, err);
       sessionMeta[sessionId].status = 'error';
-      sessionMeta[sessionId].error = err.message;
+      sessionMeta[sessionId].error = err.stack || err.message || String(err);
     });
 
   } catch (err) {
-    console.error(`[Pure WebJS Exception ${sessionId}]: ${err.message}`);
+    console.error(`[Pure WebJS Exception ${sessionId}]:`, err);
     sessionMeta[sessionId].status = 'error';
-    sessionMeta[sessionId].error = err.message;
+    sessionMeta[sessionId].error = err.stack || err.message || String(err);
   }
 
   return sessionMeta[sessionId];
