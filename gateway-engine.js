@@ -85,12 +85,23 @@ async function initSession(sessionId, sessionName = 'Primary WebJS Line') {
     ];
 
     const puppeteerOptions = {
-      headless: true,
+      headless: 'new',
       args: puppeteerArgs
     };
 
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-      puppeteerOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    const possiblePaths = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/google-chrome-stable'
+    ];
+
+    for (const p of possiblePaths) {
+      if (p && fs.existsSync(p)) {
+        puppeteerOptions.executablePath = p;
+        console.log(`[Pure WebJS Engine] Using Chromium binary at: ${p}`);
+        break;
+      }
     }
 
     const client = new Client({
