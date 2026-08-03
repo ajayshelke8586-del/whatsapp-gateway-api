@@ -1,13 +1,11 @@
-/**
- * Render Blueprint (render.yaml) for 100% Free WhatsApp Gateway API
- */
 services:
   - type: web
     name: whatsapp-gateway-api
-    env: node
+    env: docker
     plan: free
-    buildCommand: npm install
-    startCommand: node server.js
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: WEBHOOK_URL
-        value: https://wacrm.panthm.com/api/webhook
+        value: https://wacrm.panthm.com/api/webhook.php
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium

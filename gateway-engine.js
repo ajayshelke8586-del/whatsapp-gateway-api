@@ -204,18 +204,36 @@ async function handleWebJSMessage(sessionId, sessionName, msg) {
 async function syncWebJSHistory(sessionId, client) {
   try {
     const chats = await client.getChats().catch(() => []);
-    const formattedContacts = chats.map(c => ({
-      phone_number: `+${c.id.user}`,
-      name: c.name || c.pushname || `+${c.id.user}`
-    })).filter(c => c.phone_number.length >= 8);
+    console.log(`[Pure WebJS History Sync] Found ${chats.length} chats in WebJS DOM`);
 
-    dispatchWebhook('history_sync', {
-      session_id: sessionId,
-      contacts: formattedContacts,
-      messages: []
-    });
+    for (const chat of chats) {
+      if (chat.isGroup) continue;
+      const phone = parsePhoneFromJID(chat.id._serialized) || (chat.id.user ? `+${chat.id.user}` : null);
+      if (!phone) continue;
+
+      const contactName = chat.name || chat.pushname || phone;
+      
+      // Fetch up to 50 historical messages per chat directly from WhatsApp Web DOM
+      const messages = await chat.fetchMessages({ limit: 50 }).catch(() => []);
+      
+      for (const msg of messages) {
+        const bodyText = msg.body || (msg.hasMedia ? '📷 Photo' : '');
+        if (!bodyText) continue;
+
+        dispatchWebhook('incoming_message', {
+          session_id: sessionId,
+          session_name: sessionMeta[sessionId]?.session_name || 'Primary WebJS Line',
+          sender_number: sessionMeta[sessionId]?.phone_number || 'Unknown',
+          contact_number: phone,
+          contact_name: contactName,
+          body: bodyText,
+          direction: msg.fromMe ? 'outbound' : 'inbound',
+          timestamp: msg.timestamp ? (msg.timestamp * 1000) : Date.now()
+        });
+      }
+    }
   } catch (e) {
-    console.error('[Pure WebJS History Sync Warning]:', e.message);
+    console.error('[Pure WebJS History Sync Error]:', e.message);
   }
 }
 
