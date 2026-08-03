@@ -1,19 +1,21 @@
 const path = require('path');
 const fs = require('fs');
+const pino = require('pino');
 const QRCode = require('qrcode');
 const axios = require('axios');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
+const logger = pino({ level: 'silent' });
 const activeClients = {};
+const activeSockets = {};
 const sessionQRCodes = {};
 const sessionMeta = {};
 
-// Configurable Webhook Target URL
-let webhookUrl = process.env.WEBHOOK_URL || 'https://wacrm.panthm.com/api/webhook';
+let webhookUrl = process.env.WEBHOOK_URL || 'https://wacrm.panthm.com/api/webhook.php';
 
 function setWebhookUrl(url) {
   webhookUrl = url;
-  console.log(`[Pure WebJS Engine] Destination Webhook set to: ${url}`);
+  console.log(`[Gateway Engine] Destination Webhook set to: ${url}`);
 }
 
 function getWebhookUrl() {
@@ -30,10 +32,13 @@ function parsePhoneFromJID(jid) {
 
 function formatJID(phone) {
   const clean = phone.replace(/\D/g, '');
-  return `${clean}@c.us`;
+  return `${clean}@s.whatsapp.net`;
 }
 
-// Automatically restore all saved sessions on startup
+async function getBaileys() {
+  return await import('@whiskeysockets/baileys');
+}
+
 async function loadSavedSessions() {
   const sessionsDir = path.join(__dirname, 'sessions');
   if (!fs.existsSync(sessionsDir)) return;
@@ -42,145 +47,173 @@ async function loadSavedSessions() {
   for (const folder of folders) {
     if (folder.startsWith('session-')) {
       const sessionId = folder.replace('session-', '');
-      console.log(`[Pure WebJS Engine] Auto-restoring session: ${sessionId}`);
-      initSession(sessionId, 'Saved WebJS Account').catch(err => {
-        console.error(`[Pure WebJS Engine] Auto-restore error for ${sessionId}:`, err.message);
+      console.log(`[Gateway Engine] Auto-restoring session: ${sessionId}`);
+      initSession(sessionId, 'Saved Account').catch(err => {
+        console.error(`[Gateway Engine] Auto-restore error for ${sessionId}:`, err.message);
       });
     }
   }
 }
 
-// Initialize Pure whatsapp-web.js + Puppeteer Engine Session
-async function initSession(sessionId, sessionName = 'Primary WebJS Line') {
-  if (activeClients[sessionId]) {
-    return sessionMeta[sessionId];
-  }
-
-  console.log(`[Pure WebJS Engine] Initializing Session ID: ${sessionId} ("${sessionName}")`);
+async function initSession(sessionId, sessionName = 'Sales Line') {
+  console.log(`[Gateway Engine] Initializing Session ID: ${sessionId} ("${sessionName}")`);
 
   sessionMeta[sessionId] = {
     id: sessionId,
     session_name: sessionName,
-    phone_number: sessionMeta[sessionId]?.phone_number || 'Connecting WebJS...',
+    phone_number: sessionMeta[sessionId]?.phone_number || 'Connecting...',
     status: 'connecting',
-    engine: 'pure_webjs',
     created_at: Date.now()
   };
 
+  const possiblePaths = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome-stable'
+  ];
+
+  let chromePath = null;
+  for (const p of possiblePaths) {
+    if (p && fs.existsSync(p)) {
+      chromePath = p;
+      break;
+    }
+  }
+
+  // Try WebJS if Chrome path exists, else fall back to Baileys WebSockets
+  if (chromePath) {
+    console.log(`[Gateway Engine] Chrome binary detected at ${chromePath}. Using WebJS Engine.`);
+    return initWebJSEngine(sessionId, sessionName, chromePath);
+  } else {
+    console.log(`[Gateway Engine] No OS Chromium binary detected. Using Baileys WebSockets Cloud Engine.`);
+    return initBaileysEngine(sessionId, sessionName);
+  }
+}
+
+async function initWebJSEngine(sessionId, sessionName, chromePath) {
   try {
     const authDir = path.join(__dirname, 'sessions');
-    if (!fs.existsSync(authDir)) {
-      fs.mkdirSync(authDir, { recursive: true });
-    }
-
-    const puppeteerArgs = [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--single-process',
-      '--disable-gpu'
-    ];
-
-    const puppeteerOptions = {
-      headless: 'new',
-      args: puppeteerArgs
-    };
-
-    const possiblePaths = [
-      process.env.PUPPETEER_EXECUTABLE_PATH,
-      '/usr/bin/chromium',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/google-chrome-stable'
-    ];
-
-    for (const p of possiblePaths) {
-      if (p && fs.existsSync(p)) {
-        puppeteerOptions.executablePath = p;
-        console.log(`[Pure WebJS Engine] Using Chromium binary at: ${p}`);
-        break;
-      }
-    }
-
     const client = new Client({
-      authStrategy: new LocalAuth({
-        clientId: sessionId,
-        dataPath: authDir
-      }),
-      puppeteer: puppeteerOptions
+      authStrategy: new LocalAuth({ clientId: sessionId, dataPath: authDir }),
+      puppeteer: {
+        headless: 'new',
+        executablePath: chromePath,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+      }
     });
 
     activeClients[sessionId] = client;
+    sessionMeta[sessionId].engine = 'webjs';
 
     client.on('qr', async (qr) => {
-      console.log(`[Pure WebJS Engine] QR Code generated for session ${sessionId}`);
-      try {
-        const qrDataURL = await QRCode.toDataURL(qr);
-        sessionQRCodes[sessionId] = qrDataURL;
-        sessionMeta[sessionId].status = 'qr_ready';
-      } catch (err) {
-        console.error('[Pure WebJS Engine] Error generating QR data URL:', err.message);
-      }
-    });
-
-    client.on('authenticated', () => {
-      console.log(`[Pure WebJS Engine ${sessionId}] Authenticated successfully!`);
-      sessionMeta[sessionId].status = 'authenticated';
-      delete sessionQRCodes[sessionId];
+      const qrDataURL = await QRCode.toDataURL(qr);
+      sessionQRCodes[sessionId] = qrDataURL;
+      sessionMeta[sessionId].status = 'qr_ready';
     });
 
     client.on('ready', async () => {
-      const info = client.info;
-      const phone = info?.wid?.user ? `+${info.wid.user}` : '+919834969054';
-      console.log(`[Pure WebJS Engine ${sessionId}] READY! Phone: ${phone}`);
-
+      const phone = client.info?.wid?.user ? `+${client.info.wid.user}` : '+919834969054';
       delete sessionQRCodes[sessionId];
       sessionMeta[sessionId].phone_number = phone;
       sessionMeta[sessionId].status = 'active';
-
-      dispatchWebhook('session_connected', {
-        sessionId,
-        sessionName,
-        phone_number: phone,
-        engine: 'pure_webjs'
-      });
-
-      // Full Chat & Contact History Sync to Hostinger CRM
-      syncWebJSHistory(sessionId, client);
+      dispatchWebhook('session_connected', { sessionId, sessionName, phone_number: phone });
     });
 
-    client.on('message', async (msg) => {
-      handleWebJSMessage(sessionId, sessionName, msg);
+    client.on('message', async (msg) => handleWebJSMessage(sessionId, sessionName, msg));
+    client.on('message_create', async (msg) => { if (msg.fromMe) handleWebJSMessage(sessionId, sessionName, msg); });
+
+    client.initialize().catch(err => {
+      console.error(`[WebJS Engine Error]: ${err.message}. Falling back to Baileys...`);
+      initBaileysEngine(sessionId, sessionName);
+    });
+  } catch (err) {
+    initBaileysEngine(sessionId, sessionName);
+  }
+  return sessionMeta[sessionId];
+}
+
+async function initBaileysEngine(sessionId, sessionName) {
+  try {
+    const baileys = await getBaileys();
+    const makeWASocket = baileys.default?.default || baileys.default || baileys.makeWASocket;
+    const useMultiFileAuthState = baileys.useMultiFileAuthState || baileys.default?.useMultiFileAuthState;
+    const DisconnectReason = baileys.DisconnectReason || baileys.default?.DisconnectReason;
+
+    const authDir = path.join(__dirname, 'sessions', `session-${sessionId}`);
+    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
+
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
+
+    const sock = makeWASocket({
+      auth: state,
+      logger: logger,
+      printQRInTerminal: false
     });
 
-    client.on('message_create', async (msg) => {
-      if (msg.fromMe) {
-        handleWebJSMessage(sessionId, sessionName, msg);
+    activeSockets[sessionId] = sock;
+    sessionMeta[sessionId].engine = 'baileys';
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+      if (qr) {
+        console.log(`[Baileys Engine] QR generated for ${sessionId}`);
+        const qrDataURL = await QRCode.toDataURL(qr);
+        sessionQRCodes[sessionId] = qrDataURL;
+        sessionMeta[sessionId].status = 'qr_ready';
+      }
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
+        delete sessionQRCodes[sessionId];
+        if (!shouldReconnect) {
+          sessionMeta[sessionId].status = 'disconnected';
+          delete activeSockets[sessionId];
+        } else {
+          sessionMeta[sessionId].status = 'reconnecting';
+          setTimeout(() => initBaileysEngine(sessionId, sessionName), 3000);
+        }
+      }
+      if (connection === 'open') {
+        const userJID = sock.user.id.split(':')[0];
+        const phone = `+${userJID}`;
+        delete sessionQRCodes[sessionId];
+        sessionMeta[sessionId].phone_number = phone;
+        sessionMeta[sessionId].status = 'active';
+        dispatchWebhook('session_connected', { sessionId, sessionName, phone_number: phone });
       }
     });
 
-    client.on('disconnected', (reason) => {
-      console.log(`[Pure WebJS Engine ${sessionId}] Disconnected: ${reason}`);
-      sessionMeta[sessionId].status = 'disconnected';
-      delete activeClients[sessionId];
-      delete sessionQRCodes[sessionId];
-      dispatchWebhook('session_disconnected', { sessionId, sessionName });
-    });
+    sock.ev.on('messages.upsert', async (m) => {
+      if (m.type !== 'notify') return;
+      for (const msg of m.messages) {
+        if (!msg.message) continue;
+        const contactPhone = parsePhoneFromJID(msg.key.remoteJid);
+        if (!contactPhone) continue;
 
-    client.initialize().catch((err) => {
-      console.error(`[Pure WebJS Init Error ${sessionId}]:`, err);
-      sessionMeta[sessionId].status = 'error';
-      sessionMeta[sessionId].error = err.stack || err.message || String(err);
+        const bodyText = msg.message.conversation || msg.message.extendedTextMessage?.text || (msg.message.imageMessage ? '📷 Image' : '');
+        if (!bodyText) continue;
+
+        dispatchWebhook('incoming_message', {
+          session_id: sessionId,
+          session_name: sessionName,
+          sender_number: sessionMeta[sessionId]?.phone_number || 'Unknown',
+          contact_number: contactPhone,
+          contact_name: msg.pushName || contactPhone,
+          body: bodyText,
+          direction: msg.key.fromMe ? 'outbound' : 'inbound',
+          timestamp: msg.messageTimestamp ? (Number(msg.messageTimestamp) * 1000) : Date.now()
+        });
+      }
     });
 
   } catch (err) {
-    console.error(`[Pure WebJS Exception ${sessionId}]:`, err);
+    console.error(`[Baileys Engine Error ${sessionId}]:`, err.message);
     sessionMeta[sessionId].status = 'error';
-    sessionMeta[sessionId].error = err.stack || err.message || String(err);
+    sessionMeta[sessionId].error = err.message;
   }
-
   return sessionMeta[sessionId];
 }
 
@@ -194,7 +227,6 @@ async function handleWebJSMessage(sessionId, sessionName, msg) {
     const contactName = contact?.pushname || contact?.name || phone;
     const direction = msg.fromMe ? 'outbound' : 'inbound';
     const bodyText = msg.body || (msg.hasMedia ? '📷 Photo' : '');
-
     if (!bodyText) return;
 
     dispatchWebhook('incoming_message', {
@@ -207,63 +239,27 @@ async function handleWebJSMessage(sessionId, sessionName, msg) {
       direction: direction,
       timestamp: msg.timestamp ? (msg.timestamp * 1000) : Date.now()
     });
-  } catch (e) {
-    console.error('[Pure WebJS Message Error]:', e.message);
-  }
+  } catch (e) {}
 }
 
-async function syncWebJSHistory(sessionId, client) {
-  try {
-    const chats = await client.getChats().catch(() => []);
-    console.log(`[Pure WebJS History Sync] Found ${chats.length} chats in WebJS DOM`);
-
-    for (const chat of chats) {
-      if (chat.isGroup) continue;
-      const phone = parsePhoneFromJID(chat.id._serialized) || (chat.id.user ? `+${chat.id.user}` : null);
-      if (!phone) continue;
-
-      const contactName = chat.name || chat.pushname || phone;
-      
-      // Fetch up to 50 historical messages per chat directly from WhatsApp Web DOM
-      const messages = await chat.fetchMessages({ limit: 50 }).catch(() => []);
-      
-      for (const msg of messages) {
-        const bodyText = msg.body || (msg.hasMedia ? '📷 Photo' : '');
-        if (!bodyText) continue;
-
-        dispatchWebhook('incoming_message', {
-          session_id: sessionId,
-          session_name: sessionMeta[sessionId]?.session_name || 'Primary WebJS Line',
-          sender_number: sessionMeta[sessionId]?.phone_number || 'Unknown',
-          contact_number: phone,
-          contact_name: contactName,
-          body: bodyText,
-          direction: msg.fromMe ? 'outbound' : 'inbound',
-          timestamp: msg.timestamp ? (msg.timestamp * 1000) : Date.now()
-        });
-      }
-    }
-  } catch (e) {
-    console.error('[Pure WebJS History Sync Error]:', e.message);
-  }
-}
-
-// Outbound Message Sender
 async function sendMessage(sessionId, recipientPhone, textBody) {
-  const client = activeClients[sessionId] || Object.values(activeClients)[0];
-  if (!client) {
-    throw new Error(`WebJS Session ${sessionId} is not active. Please scan QR first.`);
+  const webjsClient = activeClients[sessionId];
+  if (webjsClient) {
+    const clean = recipientPhone.replace(/\D/g, '');
+    return await webjsClient.sendMessage(`${clean}@c.us`, textBody);
   }
 
-  const jid = formatJID(recipientPhone);
-  return await client.sendMessage(jid, textBody);
+  const sock = activeSockets[sessionId] || Object.values(activeSockets)[0];
+  if (sock) {
+    const clean = recipientPhone.replace(/\D/g, '');
+    return await sock.sendMessage(`${clean}@s.whatsapp.net`, { text: textBody });
+  }
+
+  throw new Error(`Session ID ${sessionId} is not active. Please scan QR first.`);
 }
 
 function getSession(sessionId) {
-  return {
-    ...sessionMeta[sessionId],
-    has_qr: !!sessionQRCodes[sessionId]
-  };
+  return { ...sessionMeta[sessionId], has_qr: !!sessionQRCodes[sessionId] };
 }
 
 function getQRCode(sessionId) {
@@ -275,37 +271,28 @@ function getAllSessions() {
 }
 
 async function deleteSession(sessionId) {
-  const client = activeClients[sessionId];
-  if (client) {
-    await client.destroy().catch(() => {});
+  if (activeClients[sessionId]) {
+    await activeClients[sessionId].destroy().catch(() => {});
     delete activeClients[sessionId];
+  }
+  if (activeSockets[sessionId]) {
+    try { await activeSockets[sessionId].logout(); } catch (e) {}
+    delete activeSockets[sessionId];
   }
   delete sessionQRCodes[sessionId];
   delete sessionMeta[sessionId];
 
   const authDir = path.join(__dirname, 'sessions', `session-${sessionId}`);
-  if (fs.existsSync(authDir)) {
-    fs.rmSync(authDir, { recursive: true, force: true });
-  }
+  if (fs.existsSync(authDir)) fs.rmSync(authDir, { recursive: true, force: true });
 
-  return { success: true, message: `WebJS Session ${sessionId} deleted.` };
+  return { success: true, message: `Session ${sessionId} deleted.` };
 }
 
 async function dispatchWebhook(event, payload) {
   if (!webhookUrl) return;
   try {
-    await axios.post(webhookUrl, {
-      event,
-      data: payload,
-      timestamp: Date.now()
-    }, {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 5000
-    });
-    console.log(`[Webhook Relay] Sent "${event}" to ${webhookUrl}`);
-  } catch (err) {
-    console.error(`[Webhook Relay Failed] "${event}":`, err.message);
-  }
+    await axios.post(webhookUrl, { event, data: payload, timestamp: Date.now() }, { headers: { 'Content-Type': 'application/json' }, timeout: 5000 });
+  } catch (err) {}
 }
 
 loadSavedSessions().catch(() => {});
