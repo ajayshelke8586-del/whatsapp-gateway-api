@@ -1,13 +1,12 @@
 {
   "name": "whatsapp-gateway-api",
   "version": "1.0.0",
-  "description": "WhatsApp Baileys WebSockets Gateway REST API",
+  "description": "Pure WhatsApp-Web.js + Puppeteer Engine REST API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.5.0",
     "axios": "^1.6.8",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
